@@ -14,7 +14,7 @@ func main() {
 		log.Fatalf("Couldn't resolve UDP address: %v", err)
 	}
 
-	connection, err := net.DialUDP("udp", listener, listener)
+	connection, err := net.DialUDP("udp", nil, listener)
 	if err != nil {
 		log.Fatalf("Couldnt dial a UDP connection: %v", err)
 	}
