@@ -2,54 +2,19 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
+
+	"github.com/magicznykacpur/httpfromtcp/internal/request"
 )
-
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	lines := make(chan string)
-	line := ""
-
-	go func() {
-		for {
-			bytes := make([]byte, 8)
-
-			_, err := f.Read(bytes)
-			if err == io.EOF {
-				if line != "" {
-					lines <- line
-				}
-
-				f.Close()
-				close(lines)
-
-				return
-			}
-
-			parts := strings.Split(string(bytes), "\n")
-
-			if len(parts) == 1 {
-				line += parts[0]
-			} else {
-				line += parts[0]
-				lines <- line
-
-				line = ""
-				line += parts[1]
-			}
-		}
-	}()
-
-	return lines
-}
 
 func main() {
 	listener, err := net.Listen("tcp", ":42069")
 	if err != nil {
 		log.Fatalf("Couldn't open tcp listener on port 42069: %v", err)
 	}
+
+	log.Println("listening for tcp request on :42069")
 
 	defer listener.Close()
 
@@ -59,10 +24,14 @@ func main() {
 			log.Fatalf("Couldn't accept connection: %v", err)
 		}
 
-		lines := getLinesChannel(connection)
-
-		for line := range lines {
-			fmt.Println(line)
+		req, err := request.RequestFromReader(connection)
+		if err != nil {
+			log.Printf("%v", err)
 		}
+
+		fmt.Println("Request line:")
+		fmt.Printf("- Method: %s\n", req.RequestLine.Method)
+		fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
+		fmt.Printf("- Version: %s\n", req.RequestLine.HttpVersion)
 	}
 }
