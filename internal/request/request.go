@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -19,12 +20,14 @@ type requestState int
 const (
 	requestStateInitialized requestState = iota
 	requestStateParsingHeaders
+	requestStateParsingBody
 	requestStateDone
 )
 
 type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
+	Body        []byte
 	state       requestState
 }
 
@@ -46,7 +49,7 @@ func (r *Request) parse(data []byte) (int, error) {
 		if numBytesParsed == 0 {
 			return totalBytesParsed, nil
 		}
-		
+
 		totalBytesParsed += numBytesParsed
 	}
 
@@ -82,10 +85,33 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 		}
 
 		if done {
-			r.state = requestStateDone
+			r.state = requestStateParsingBody
 		}
 
 		return parsedBytes, nil
+	case requestStateParsingBody:
+		val, ok := r.Headers.Get("content-length")
+		if !ok {
+			r.state = requestStateDone
+			return 0, nil
+		}
+
+		r.Body = append(r.Body, data...)
+
+		contentLenght, err := strconv.Atoi(val)
+		if err != nil {
+			return 0, fmt.Errorf("couldnt convert content length to int")
+		}
+
+		if len(r.Body) > contentLenght {
+			return 0, fmt.Errorf("to much content provided")
+		}
+
+		if len(r.Body) == contentLenght {
+			r.state = requestStateDone
+		}
+
+		return len(data), nil
 	case requestStateDone:
 		return 0, fmt.Errorf("error: trying to read data in a done state")
 	default:
@@ -125,6 +151,18 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		readToIndex -= numParsedBytes
 	}
 
+	val, ok := request.Headers.Get("content-length")
+	if ok {
+		contentLength, err := strconv.Atoi(val)
+		if err != nil {
+			return nil, fmt.Errorf("couldnt convert content-length to int")
+		}
+
+		if len(request.Body) < contentLength {
+			return nil, fmt.Errorf("not enough content provided")
+		}
+	}
+
 	return &request, nil
 }
 
@@ -139,7 +177,7 @@ func parseRequestLine(data []byte) (*RequestLine, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	return requestLine, idx + 2, nil
 }
 
