@@ -15,7 +15,6 @@ func NewHeaders() Headers {
 }
 
 const crlf = "\r\n"
-
 var specialCharacters = []string{"!", "~", "#", "$", "%", "&", "'", "*", "-", ".", "^", "_", "`", "|"}
 
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
