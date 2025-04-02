@@ -19,6 +19,7 @@ const (
 	writerStateInitialized writerState = iota
 	writerStateWritingHeaders
 	writerStateWritingBody
+	writerStateWritingTrailers
 )
 
 type StatusCode int
@@ -120,11 +121,33 @@ func (w *Writer) WriteChunkedBodyDone() (int, error) {
 	if w.state != writerStateWritingBody {
 		return 0, fmt.Errorf("cannot write body in state %d", w.state)
 	}
-	n, err := w.Buffer.Write([]byte("0\r\n\r\n"))
+	n, err := w.Buffer.Write([]byte("0\r\n"))
 	if err != nil {
 		return n, err
 	}
+	w.state = writerStateWritingTrailers
+
 	return n, nil
+}
+
+func (w *Writer) WriteTrailers(headers headers.Headers) error {
+	if w.state != writerStateWritingTrailers {
+		return fmt.Errorf("cannot write trailers in state %d", w.state)
+	}
+
+	for key, value := range headers {
+		_, err := w.Buffer.Write([]byte(fmt.Sprintf("%s: %s%s", key, value, crlf)))
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err := w.Buffer.Write([]byte(crlf))
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func GetDefaultHeaders(contentLen int) headers.Headers {

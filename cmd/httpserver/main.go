@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log"
@@ -66,16 +67,18 @@ func proxyHandler(w response.Writer, r *request.Request) *server.HandlerError {
 		getUnknownHandlerError(err)
 	}
 
-	headers := headers.NewHeaders()
-	headers.Set("Transfer-Encoding", "chunked")
-	headers.Set("Connection", "close")
+	resHeaders := headers.NewHeaders()
+	resHeaders.Set("Transfer-Encoding", "chunked")
+	resHeaders.Set("Connection", "close")
+	resHeaders.Set("Trailer", "X-Content-Sha256, X-Content-Length")
 
-	err = w.WriteHeaders(headers)
+	err = w.WriteHeaders(resHeaders)
 	if err != nil {
 		return getUnknownHandlerError(err)
 	}
 
 	buff := make([]byte, 1024)
+	fullBody := make([]byte, 0)
 	for {
 		n, err := res.Body.Read(buff)
 
@@ -85,6 +88,8 @@ func proxyHandler(w response.Writer, r *request.Request) *server.HandlerError {
 				fmt.Println("Error writing chunked body:", err)
 				break
 			}
+
+			fullBody = append(fullBody, buff[:n]...)
 		}
 
 		if err == io.EOF {
@@ -99,6 +104,15 @@ func proxyHandler(w response.Writer, r *request.Request) *server.HandlerError {
 	}
 
 	_, err = w.WriteChunkedBodyDone()
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+
+	trailerHeaders := headers.NewHeaders()
+	trailerHeaders.Set("X-Content-Sha256", fmt.Sprintf("%x", sha256.Sum256(fullBody)))
+	trailerHeaders.Set("X-Content-Length", fmt.Sprintf("%d", len(fullBody)))
+
+	err = w.WriteTrailers(trailerHeaders)
 	if err != nil {
 		return getUnknownHandlerError(err)
 	}
