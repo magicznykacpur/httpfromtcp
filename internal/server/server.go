@@ -1,26 +1,28 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"sync/atomic"
 
+	"github.com/magicznykacpur/httpfromtcp/internal/request"
 	"github.com/magicznykacpur/httpfromtcp/internal/response"
 )
 
 type Server struct {
-	port     int
 	listener net.Listener
 	isClosed atomic.Bool
+	handler  Handler
 }
 
-func Serve(port int) (*Server, error) {
+func Serve(port int, handler Handler) (*Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, fmt.Errorf("couldn't open listener on port %d: %v", port, err)
 	}
 
-	server := &Server{port: port, listener: listener, isClosed: atomic.Bool{}}
+	server := &Server{listener: listener, isClosed: atomic.Bool{}, handler: handler}
 	server.isClosed.Store(false)
 
 	go server.listen()
@@ -56,14 +58,44 @@ func (s *Server) listen() {
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
-	err := response.WriteStatusLine(conn, 200)
+	req, err := request.RequestFromReader(conn)
 	if err != nil {
-		fmt.Println(err)
+		hErr := &HandlerError{
+			StatusCode: response.BadRequest,
+			Message:    err.Error(),
+		}
+		hErr.WriteError(conn)
+		return
 	}
-	
-	defaultHeaders := response.GetDefaultHeaders(0)
+
+	buf := bytes.NewBuffer([]byte{})
+	handlerErr := s.handler(buf, req)
+	if handlerErr != nil {
+		handlerErr.WriteError(conn)
+		return
+	}
+
+	defaultHeaders := response.GetDefaultHeaders(len(buf.Bytes()))
+
+	err = response.WriteStatusLine(conn, 200)
+	if err != nil {
+		hErr := &HandlerError{
+			StatusCode: response.InternalServerError,
+			Message:    err.Error(),
+		}
+		hErr.WriteError(conn)
+		return
+	}
+
 	err = response.WriteHeaders(conn, defaultHeaders)
 	if err != nil {
-		fmt.Println(err)
+		hErr := &HandlerError{
+			StatusCode: response.InternalServerError,
+			Message:    err.Error(),
+		}
+		hErr.WriteError(conn)
+		return
 	}
+
+	conn.Write(buf.Bytes())
 }
