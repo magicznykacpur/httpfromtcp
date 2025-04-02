@@ -63,3 +63,13 @@ func (h Headers) Get(key string) (string, bool) {
 	val, ok := h[key]
 	return val, ok
 }
+
+func (h Headers) OverrideHeader(key, value string) error {
+	_, ok := h[key]
+	if !ok {
+		return fmt.Errorf("header not found")
+	}
+
+	h[key] = value
+	return nil
+}

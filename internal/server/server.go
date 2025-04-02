@@ -1,11 +1,11 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"sync/atomic"
 
+	"github.com/magicznykacpur/httpfromtcp/internal/headers"
 	"github.com/magicznykacpur/httpfromtcp/internal/request"
 	"github.com/magicznykacpur/httpfromtcp/internal/response"
 )
@@ -58,44 +58,32 @@ func (s *Server) listen() {
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
+	resWriter := response.NewWriter()
 	req, err := request.RequestFromReader(conn)
 	if err != nil {
+		errorHeaders := headers.NewHeaders()
+		errorHeaders.Set("Content-Type", "text/plain")
+
 		hErr := &HandlerError{
-			StatusCode: response.BadRequest,
-			Message:    err.Error(),
+			StatusCode: response.StatusBadRequest,
+			Body:       []byte(err.Error()),
+			Headers:    errorHeaders,
 		}
-		hErr.WriteError(conn)
+		hErr.WriteError(*resWriter)
 		return
 	}
 
-	buf := bytes.NewBuffer([]byte{})
-	handlerErr := s.handler(buf, req)
+	handlerErr := s.handler(*resWriter, req)
 	if handlerErr != nil {
-		handlerErr.WriteError(conn)
-		return
-	}
-
-	defaultHeaders := response.GetDefaultHeaders(len(buf.Bytes()))
-
-	err = response.WriteStatusLine(conn, 200)
-	if err != nil {
-		hErr := &HandlerError{
-			StatusCode: response.InternalServerError,
-			Message:    err.Error(),
+		err = handlerErr.WriteError(*resWriter)
+		if err != nil {
+			conn.Write([]byte(err.Error()))
+			return
 		}
-		hErr.WriteError(conn)
+		
+		conn.Write(resWriter.Buffer.Bytes())
 		return
 	}
 
-	err = response.WriteHeaders(conn, defaultHeaders)
-	if err != nil {
-		hErr := &HandlerError{
-			StatusCode: response.InternalServerError,
-			Message:    err.Error(),
-		}
-		hErr.WriteError(conn)
-		return
-	}
-
-	conn.Write(buf.Bytes())
+	conn.Write(resWriter.Buffer.Bytes())
 }
