@@ -34,6 +34,11 @@ func main() {
 }
 
 func handler(w response.Writer, r *request.Request) *server.HandlerError {
+	if r.RequestLine.RequestTarget == "/video" {
+		handlerGetVideo(w)
+		return nil
+	}
+
 	if strings.HasPrefix(r.RequestLine.RequestTarget, "/httpbin/") {
 		proxyHandler(w, r)
 		return nil
@@ -113,6 +118,33 @@ func proxyHandler(w response.Writer, r *request.Request) *server.HandlerError {
 	trailerHeaders.Set("X-Content-Length", fmt.Sprintf("%d", len(fullBody)))
 
 	err = w.WriteTrailers(trailerHeaders)
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+
+	return nil
+}
+
+func handlerGetVideo(w response.Writer) *server.HandlerError {
+	err := w.WriteStatusLine(response.StatusOk)
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+
+	headers := headers.NewHeaders()
+	headers.Set("Content-Type", "video/mp4")
+
+	err = w.WriteHeaders(headers)
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+
+	video, err := os.ReadFile("assets/vim.mp4")
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+
+	_, err = w.WriteBody(video)
 	if err != nil {
 		return getUnknownHandlerError(err)
 	}
