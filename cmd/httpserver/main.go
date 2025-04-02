@@ -1,9 +1,13 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/magicznykacpur/httpfromtcp/internal/headers"
@@ -29,54 +33,131 @@ func main() {
 }
 
 func handler(w response.Writer, r *request.Request) *server.HandlerError {
+	if strings.HasPrefix(r.RequestLine.RequestTarget, "/httpbin/") {
+		proxyHandler(w, r)
+		return nil
+	}
+
+	if r.RequestLine.RequestTarget == "/yourproblem" {
+		handler400()
+		return nil
+	}
+
+	if r.RequestLine.RequestTarget == "/myproblem" {
+		handler500()
+		return nil
+	}
+
+	handler200(w)
+	return nil
+}
+
+func proxyHandler(w response.Writer, r *request.Request) *server.HandlerError {
+	target := strings.TrimPrefix(r.RequestLine.RequestTarget, "/httpbin/")
+
+	res, err := http.Get(fmt.Sprintf("https://httpbin.org/%s", target))
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+	defer res.Body.Close()
+
+	err = w.WriteStatusLine(response.StatusOk)
+	if err != nil {
+		getUnknownHandlerError(err)
+	}
+
+	headers := headers.NewHeaders()
+	headers.Set("Transfer-Encoding", "chunked")
+	headers.Set("Connection", "close")
+
+	err = w.WriteHeaders(headers)
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+
+	buff := make([]byte, 1024)
+	for {
+		n, err := res.Body.Read(buff)
+
+		if n > 0 {
+			_, err := w.WriteChunkedBody(buff[:n])
+			if err != nil {
+				fmt.Println("Error writing chunked body:", err)
+				break
+			}
+		}
+
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			fmt.Println("Error reading response body:", err)
+			break
+		}
+
+	}
+
+	_, err = w.WriteChunkedBodyDone()
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+
+	return nil
+}
+
+func handler400() *server.HandlerError {
 	errorHeaders := headers.NewHeaders()
 	errorHeaders.Set("Content-Type", "text/html")
 
-	switch r.RequestLine.RequestTarget {
-	case "/yourproblem":
-		return &server.HandlerError{
-			StatusCode: response.StatusBadRequest,
-			Headers:    errorHeaders,
-			Body:       badRequest,
-		}
-	case "/myproblem":
-		return &server.HandlerError{
-			StatusCode: response.StatusInternalServerError,
-			Headers:    errorHeaders,
-			Body:       internalServerError,
-		}
-	default:
-		err := w.WriteStatusLine(response.StatusOk)
-		if err != nil {
-			return &server.HandlerError{
-				StatusCode: response.StatusInternalServerError,
-				Headers:    errorHeaders,
-				Body:       internalServerError,
-			}
-		}
+	return &server.HandlerError{
+		StatusCode: response.StatusBadRequest,
+		Headers:    errorHeaders,
+		Body:       badRequest,
+	}
+}
 
-		headers := response.GetDefaultHeaders(len(okRequest))
-		headers.OverrideHeader("Content-Type", "text/html")
+func handler500() *server.HandlerError {
+	errorHeaders := headers.NewHeaders()
+	errorHeaders.Set("Content-Type", "text/html")
 
-		err = w.WriteHeaders(headers)
-		if err != nil {
-			return &server.HandlerError{
-				StatusCode: response.StatusInternalServerError,
-				Headers:    errorHeaders,
-				Body:       internalServerError,
-			}
-		}
+	return &server.HandlerError{
+		StatusCode: response.StatusInternalServerError,
+		Headers:    errorHeaders,
+		Body:       internalServerError,
+	}
+}
 
-		_, err = w.WriteBody(okRequest)
-		if err != nil {
-			return &server.HandlerError{
-				StatusCode: response.StatusInternalServerError,
-				Headers:    errorHeaders,
-				Body:       internalServerError,
-			}
-		}
+func handler200(w response.Writer) *server.HandlerError {
+	err := w.WriteStatusLine(response.StatusOk)
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
 
-		return nil
+	headers := response.GetDefaultHeaders(len(okRequest))
+	headers.OverrideHeader("Content-Type", "text/html")
+
+	err = w.WriteHeaders(headers)
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+
+	_, err = w.WriteBody(okRequest)
+	if err != nil {
+		return getUnknownHandlerError(err)
+	}
+
+	return nil
+}
+
+func getUnknownHandlerError(err error) *server.HandlerError {
+	errorHeaders := headers.NewHeaders()
+	errorHeaders.Set("Content-Type", "text/plain")
+
+	return &server.HandlerError{
+		StatusCode: response.StatusInternalServerError,
+		Headers:    errorHeaders,
+		Body:       []byte(err.Error()),
 	}
 }
 

@@ -3,7 +3,6 @@ package response
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"strconv"
 
 	"github.com/magicznykacpur/httpfromtcp/internal/headers"
@@ -90,6 +89,44 @@ func (w *Writer) WriteBody(bytes []byte) (int, error) {
 	return w.Buffer.Write(bytes)
 }
 
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	if w.state != writerStateWritingBody {
+		return 0, fmt.Errorf("cannot write body in state %d", w.state)
+	}
+	chunkSize := len(p)
+
+	nTotal := 0
+	n, err := fmt.Fprintf(w.Buffer, "%x\r\n", chunkSize)
+	if err != nil {
+		return nTotal, err
+	}
+	nTotal += n
+
+	n, err = w.Buffer.Write(p)
+	if err != nil {
+		return nTotal, err
+	}
+	nTotal += n
+
+	n, err = w.Buffer.Write([]byte("\r\n"))
+	if err != nil {
+		return nTotal, err
+	}
+	nTotal += n
+	return nTotal, nil
+}
+
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	if w.state != writerStateWritingBody {
+		return 0, fmt.Errorf("cannot write body in state %d", w.state)
+	}
+	n, err := w.Buffer.Write([]byte("0\r\n\r\n"))
+	if err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
 func GetDefaultHeaders(contentLen int) headers.Headers {
 	defaultHeaders := headers.NewHeaders()
 
@@ -98,15 +135,4 @@ func GetDefaultHeaders(contentLen int) headers.Headers {
 	defaultHeaders.Set("Content-Type", "text/plain")
 
 	return defaultHeaders
-}
-
-func WriteHeaders(w io.Writer, headers headers.Headers) error {
-	for key, value := range headers {
-		_, err := w.Write([]byte(fmt.Sprintf("%s: %s%s", key, value, crlf)))
-		if err != nil {
-			return err
-		}
-	}
-	_, err := w.Write([]byte("\r\n"))
-	return err
 }

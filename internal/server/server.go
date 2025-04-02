@@ -80,7 +80,7 @@ func (s *Server) handle(conn net.Conn) {
 			conn.Write([]byte(err.Error()))
 			return
 		}
-		
+
 		conn.Write(resWriter.Buffer.Bytes())
 		return
 	}
